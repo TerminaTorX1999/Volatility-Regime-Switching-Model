@@ -1,0 +1,49 @@
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from hmmlearn.hmm import GaussianHMM
+import matplotlib.pyplot as plt
+
+# Download S&P 500 daily data
+ticker = '^GSPC'
+data = yf.download(ticker, start='2015-01-01', end='2024-01-01')
+data['Returns'] = data['Adj Close'].pct_change().dropna()
+
+# Prepare data for HMM: use returns and their squared values (proxy for volatility)
+X = np.column_stack([data['Returns'].dropna(), data['Returns'].dropna()**2])
+
+# Fit HMM with 2 states (regimes)
+model = GaussianHMM(n_components=2, covariance_type='full', n_iter=1000).fit(X)
+
+# Predict hidden states (regimes)
+hidden_states = model.predict(X)
+
+data = data.iloc[1:]  # Align data after dropna()
+data['Regime'] = hidden_states
+
+# Visualize regimes
+plt.figure(figsize=(15, 6))
+for i in range(model.n_components):
+    idx = (data['Regime'] == i)
+    plt.plot(data.index[idx], data['Adj Close'][idx], '.', label=f'Regime {i}')
+plt.title('S&P 500 Price Colored by Volatility Regime')
+plt.legend()
+plt.show()
+
+# Generate trading signals:
+# Assume Regime 0 = low volatility (go long), Regime 1 = high volatility (stay neutral or reduce exposure)
+data['Position'] = data['Regime'].apply(lambda x: 1 if x == 0 else 0)
+
+# Strategy returns
+data['Strategy_Returns'] = data['Position'].shift(1) * data['Returns']
+
+# Performance metrics
+cumulative_strategy_return = (1 + data['Strategy_Returns']).cumprod() - 1
+cumulative_market_return = (1 + data['Returns']).cumprod() - 1
+
+plt.figure(figsize=(15, 6))
+plt.plot(cumulative_strategy_return, label='Strategy Cumulative Return')
+plt.plot(cumulative_market_return, label='Market Cumulative Return')
+plt.title('Volatility Regime Switching Strategy Performance')
+plt.legend()
+plt.show()
